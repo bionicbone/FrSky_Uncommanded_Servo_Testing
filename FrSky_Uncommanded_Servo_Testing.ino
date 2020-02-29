@@ -308,6 +308,7 @@ void display_Update() {
 // Update the USB Serial Monitor
 void Serial_Update() {
 #if defined(SERIAL_UPDATE)
+	Serial.println("");
 	for (int rx = 0; rx < NUMBER_OF_RX; rx++) {
 		Serial.println(RX_NAMES[rx]);
 		Serial.print("SF "); Serial.print(totalValidFramesCounter[rx]);
@@ -366,6 +367,7 @@ void check_ChannelSignificantChange(int rx) {
 		if (abs(channels[rx][ch] - channelsPrevious[rx][ch]) > MAX_CHANNEL_INCREASE && channelMaxChangeTriggered[rx][ch] == false) {
 	
 			if (abs(channels[rx][ch] - channelsPrevious[rx][ch]) > channelsMaxChange[rx][channelsMaxChangeCounter[rx]]) {
+				channelsStartMaxChangeMillis[rx][ch] = millis();
 				Serial.print("__________________"); Serial.print(RX_NAMES[rx]); Serial.print(" = "); Serial.println("Significant Change");
 				Serial.print("__________________Frame"); Serial.print(" = "); Serial.println(totalValidFramesCounter[rx]);
 				Serial.print("__________________LongLoop"); Serial.print(" = "); Serial.println(longLoop);
@@ -373,7 +375,7 @@ void check_ChannelSignificantChange(int rx) {
 				Serial.print("__________________Pre CH"); Serial.print(ch); Serial.print(" = "); Serial.println(channelsPrevious[rx][ch]);
 				Serial.print("__________________New CH"); Serial.print(ch); Serial.print(" = "); Serial.println(channels[rx][ch]);
 				Serial.print("__________________New Max Change = "); Serial.println(abs(channels[rx][ch] - channelsPrevious[rx][ch]));
-				channelsStartMaxChangeMillis[rx][ch] = millis();
+				Serial.print("__________________millis() CH"); Serial.print(ch); Serial.print(" = "); Serial.println(channelsStartMaxChangeMillis[rx][ch]);
 				channelsMaxChange[rx][channelsMaxChangeCounter[rx]] = abs(channels[rx][ch] - channelsPrevious[rx][ch]);
 				channelNewMaxChangeTriggered[rx][ch] = true;		
 			}
@@ -381,12 +383,14 @@ void check_ChannelSignificantChange(int rx) {
 			channelMaxChangeTriggered[rx][ch] = true;
 		}
 		
-		if (abs(channels[rx][ch] - channelsPrevious[rx][ch]) <= MAX_CHANNEL_INCREASE) {
+		// has the significant change recovered
+		if (channels[rx][ch] != channelsPrevious[rx][ch] && abs(channels[rx][ch] - channelsPrevious[rx][ch]) <= MAX_CHANNEL_INCREASE) {
 			
-			if (millis() - channelsStartMaxChangeMillis[rx][ch] > channelsMaxChangeMillis[rx][channelsMaxChangeCounter[rx]] && channelNewMaxChangeTriggered[rx][ch] == true) {
+			if (channelNewMaxChangeTriggered[rx][ch] == true) {
 				channelsMaxChangeMillis[rx][channelsMaxChangeCounter[rx]] = millis() - channelsStartMaxChangeMillis[rx][ch];
 				channelNewMaxChangeTriggered[rx][ch] = false;
-				Serial.print(RX_NAMES[rx]); Serial.print(" = "); Serial.println("Significant Change Time");
+				Serial.print(RX_NAMES[rx]); Serial.print(" CH"); Serial.print(ch); Serial.print(" = "); Serial.println("Significant Change Recovered");
+				Serial.print("millis() CH"); Serial.print(ch); Serial.print(" = "); Serial.println(millis());
 				if (channelsMaxChangeCounter[rx] < 6) { channelsMaxChangeCounter[rx]++; }
 			}
 			
