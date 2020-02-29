@@ -42,7 +42,7 @@
 const byte NUMBER_OF_CH = 16;							// 8 or 16 channels to scan
 const byte NUMBER_OF_RX = 4;							// Max 2 for Teensy 3.2 / Max 6 for Teensy 4.0
 #define FrSky_SERIAL SERIAL_7							// SERIAL_3 for Teensy 3.2 / SERIAL_7 for Teensy 4.0
-const byte MAX_CHANNEL_INCREASE = 88;			// ~8 per frame, 48 = 6 frames, not less than 10
+const byte MAX_CHANNEL_INCREASE = 80;			// ~8 per frame, 48 = 6 frames, not less than 10
 
 // Connected Rx Names for Identification, connected to Serial_1, Serial_2, ect...
 const String RX_NAMES[] = { "Rx1-X4R(v1)", "Rx2-XM+(v1)" ,"Rx3-X4R(v2)", "Rx4-XM+(v2)" };
@@ -204,7 +204,7 @@ void loop()
 	do_Stuff(0);
 	// FrSky Telemetery
 #if defined(SEND_TELEMETRY)
-	rx_Telemetry(rx, millis() - loopMillis);
+	rx_Telemetry(0, millis() - loopMillis);
 #endif
 #endif
 
