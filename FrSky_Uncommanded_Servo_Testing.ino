@@ -195,10 +195,17 @@ void loop()
 			break;
 		}
 
+		// FrSky Telemetery
+#if defined(SEND_TELEMETRY)
 		rx_Telemetry(rx, millis() - loopMillis);
+#endif
 	}
 #else
 	do_Stuff(0);
+	// FrSky Telemetery
+#if defined(SEND_TELEMETRY)
+	rx_Telemetry(rx, millis() - loopMillis);
+#endif
 #endif
 
 
