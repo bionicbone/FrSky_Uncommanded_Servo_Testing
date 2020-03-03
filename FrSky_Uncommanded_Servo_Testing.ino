@@ -39,19 +39,19 @@
 #include "SBUS.h"
 
 // Config
-const byte NUMBER_OF_CH = 16;							// 8 or 16 channels to scan
-const byte NUMBER_OF_RX = 4;							// Max 2 for Teensy 3.2 / Max 6 for Teensy 4.0
+const byte NUMBER_OF_CH = 8;							// 8 or 16 channels to scan
+const byte NUMBER_OF_RX = 3;							// Max 2 for Teensy 3.2 / Max 6 for Teensy 4.0
 #define FrSky_SERIAL SERIAL_7							// SERIAL_3 for Teensy 3.2 / SERIAL_7 for Teensy 4.0
 const byte MAX_CHANNEL_INCREASE = 104;			// ~8 per frame, 48 = 6 frames, not less than 10
 
 // Connected Rx Names for Identification, connected to Serial_1, Serial_2, ect...
-const String RX_NAMES[] = { "Rx1-X4R(v1)", "Rx2-XM+(v1)" ,"Rx3-X4R(v2)", "Rx4-XM+(v2)" };
+const String RX_NAMES[] = { "Rx1-RX4R(v2-FCC)", "Rx2-XM+(v2-FCC)" ,"Rx3-X4R(v2-FCC)", "Rx4-xxx" };
 
 // Program options
 
 // Normally ON
 #define SERIAL_UPDATE										// Send TFT data to USB Serial
-#define UPDATE_DISPLAY									// Activate the TFT display and update
+//#define UPDATE_DISPLAY									// Activate the TFT display and update
 //#define SEND_TELEMETRY									// Activate Telemetry and Send
 
 // Normally OFF
@@ -60,12 +60,13 @@ const String RX_NAMES[] = { "Rx1-X4R(v1)", "Rx2-XM+(v1)" ,"Rx3-X4R(v2)", "Rx4-XM
 //#define REPORT_ERRORS									// Reports SBUS LostFrame and FailSafe flags
 //#define REPORT_ERRORS_BADFRAMES				// Reports Bad Frames (Frame Holds) on the SBUS.
 
-
+#if defined(UPDATE_DISPLAY)
 // For the Adafruit shield, these are the default.
 #define TFT_DC  9
 #define TFT_CS 10
 // Use hardware SPI (on Uno, #13, #12, #11) and the above for CS/DC
 ILI9341_t3n tft = ILI9341_t3n(TFT_CS, TFT_DC);
+#endif
 
 // a SBUS object, which is on hardware
 SBUS sbusRx1(Serial1);
@@ -106,6 +107,7 @@ bool channelNewMaxChangeTriggered[4][16] = { { false } };
 int totalValidFramesCounter[4] = { 0 };
 int badFramesCounter[4] = { 0 };
 float badFramesPercentage[4] = { 0 };
+int direction = 0;
 
 // SBUS Speed
 int sbusSpeed_uS[4] = { 0 };
@@ -141,6 +143,7 @@ void setup()
 	Serial.begin(115200);
 	delay(1); // allow serial to start
 	
+#if defined(UPDATE_DISPLAY)
 	tft.begin();
 	tft.fillScreen(ILI9341_BLACK);
 	tft.setTextColor(ILI9341_YELLOW);
@@ -150,6 +153,8 @@ void setup()
 	tft.print("Rx Monitor");
 	tft.setCursor(30, 60);
 	tft.print("Starting...");
+#endif
+
 	
 	// begin the SBUS communication
 	sbusRx1.begin();
@@ -170,7 +175,7 @@ void loop()
 {
 	unsigned long loopMillis = millis();
 
-	if (totalValidFramesCounter[0] > 1000) { firstRun = false; } // Allow everything to stabilse
+	if (totalValidFramesCounter[0] > 10000) { firstRun = false; } // Allow everything to stabilse
 
 #if!defined(NO_RX_ATTACHED)
 	// Cycle through each Rx
@@ -260,9 +265,9 @@ void do_Stuff(int rx) {
 
 	// Only update the display every 1000 frame due to processing time
 	if (rx == 0 && (float)totalValidFramesCounter[0] / 1000 == int((float)totalValidFramesCounter[0] / 1000)) { updateSerial = true; }
-	if (rx==0 && (float)totalValidFramesCounter[0] / 10000 == int((float)totalValidFramesCounter[0] / 10000)) { updateDisplay = true; }
-#if defined (UPDATE_DISPLAY)
+	if (rx==0 && (float)totalValidFramesCounter[0] / 5000 == int((float)totalValidFramesCounter[0] / 5000)) { updateDisplay = true; }
 	if (updateSerial == true) { Serial_Update(); }
+#if defined (UPDATE_DISPLAY)
 	if (updateDisplay ==true) { display_Update(); }
 #endif
 	updateSerial = false;
@@ -271,6 +276,7 @@ void do_Stuff(int rx) {
 
 // Updates the ILI9341 display
 // WARNING: Long Process !!
+#if defined(UPDATE_DISPLAY)
 void display_Update() {
 	tft.flush();
 	tft.clearWriteError();
@@ -303,7 +309,7 @@ void display_Update() {
 	tft.clearWriteError();
 	Serial.println("WARNING: Display Updated expect a speed issue");
 }
-
+#endif
 
 // Update the USB Serial Monitor
 void Serial_Update() {
@@ -334,17 +340,13 @@ void Serial_Update() {
 // Checks and times Channel Holds or Significant Change in SBUS channel data
 void check_ChannelSignificantChange(int rx) {
 	for (int ch = 0; ch < NUMBER_OF_CH; ch++) {
-		// After many tests its concluded that a "Display Update" creates a significant
-		// long loop. Normally longLoopCounters >=3 or <=8 find "significant changes".
-		// Given its not the same each time then its better to ignore the next 10 readings.
-		// We do this by setting the previous reading to the current reading
-		if (longLoopCounter >= 1 && longLoopCounter <= 10) { channelsPrevious[rx][ch] = channels[rx][ch]; }
 
 		if (firstRun == true) {
 			channelsPrevious[rx][ch] = channels[rx][ch];
 			channelsMaxChange[rx][channelsMaxChangeCounter[rx]] = 0;
-			channelsMaxChangeMillis[rx][channelsMaxChangeCounter[rx]] =0;
+			channelsMaxChangeMillis[rx][channelsMaxChangeCounter[rx]] = 0;
 		}
+
 
 		// detect channel hold
 		if (channels[rx][ch] == channelsPrevious[rx][ch] && channelHoldTriggered[rx] == false && firstRun == false) {
@@ -363,43 +365,64 @@ void check_ChannelSignificantChange(int rx) {
 			channelsPrevious[rx][ch] = channels[rx][ch];  // After a hold dont count a significant change
 		}
 
+		// After many tests its concluded that a "Display Update" creates a significant
+		// long loop. Normally longLoopCounters >=3 or <=8 find "significant changes".
+		// Given its not the same each time then its better to ignore the next 10 readings.
+		// We do this by setting the previous reading to the current reading
+		if (longLoopCounter >= 1 && longLoopCounter <= 10) { channelsPrevious[rx][ch] = channels[rx][ch]; }
+
+
 		// detect channel significant change
 		if (abs(channels[rx][ch] - channelsPrevious[rx][ch]) > MAX_CHANNEL_INCREASE && channelMaxChangeTriggered[rx][ch] == false) {
-	
+
 			if (abs(channels[rx][ch] - channelsPrevious[rx][ch]) > channelsMaxChange[rx][channelsMaxChangeCounter[rx]]) {
 				channelsStartMaxChangeMillis[rx][ch] = millis();
 				Serial.print("__________________"); Serial.print(RX_NAMES[rx]); Serial.print(" = "); Serial.println("Significant Change");
 				Serial.print("__________________Frame"); Serial.print(" = "); Serial.println(totalValidFramesCounter[rx]);
 				Serial.print("__________________LongLoop"); Serial.print(" = "); Serial.println(longLoop);
 				Serial.print("__________________LongLoopCounter"); Serial.print(" = "); Serial.println(longLoopCounter);
-				Serial.print("__________________Pre CH"); Serial.print(ch); Serial.print(" = "); Serial.println(channelsPrevious[rx][ch]);
-				Serial.print("__________________New CH"); Serial.print(ch); Serial.print(" = "); Serial.println(channels[rx][ch]);
+				Serial.print("__________________Pre CH"); Serial.print(ch+1); Serial.print(" = "); Serial.println(channelsPrevious[rx][ch]);
+				Serial.print("__________________New CH"); Serial.print(ch+1); Serial.print(" = "); Serial.println(channels[rx][ch]);
 				Serial.print("__________________New Max Change = "); Serial.println(abs(channels[rx][ch] - channelsPrevious[rx][ch]));
-				Serial.print("__________________millis() CH"); Serial.print(ch); Serial.print(" = "); Serial.println(channelsStartMaxChangeMillis[rx][ch]);
+				Serial.print("__________________Directon (0=down,1=up) = "); Serial.println(direction);
+				Serial.print("__________________millis() CH"); Serial.print(ch+1); Serial.print(" = "); Serial.println(channelsStartMaxChangeMillis[rx][ch]);
 				channelsMaxChange[rx][channelsMaxChangeCounter[rx]] = abs(channels[rx][ch] - channelsPrevious[rx][ch]);
-				channelNewMaxChangeTriggered[rx][ch] = true;		
+				channelNewMaxChangeTriggered[rx][ch] = true;
+
+				for (int ch = 0; ch < NUMBER_OF_CH; ch++) {
+					Serial.print(RX_NAMES[rx]); Serial.print(" = ");
+					Serial.print("CH"); Serial.print(ch + 1); Serial.print(" = ");
+					Serial.print(channelsPrevious[rx][ch]); Serial.print(" vs "); Serial.print(channels[rx][ch]);
+					Serial.print(" = "); Serial.print(channelsPrevious[rx][ch] - channels[rx][ch]);
+					Serial.print(" LongLoop "); Serial.println(longLoopCounter);
+				}
 			}
-			
+
 			channelMaxChangeTriggered[rx][ch] = true;
 		}
-		
+
 		// has the significant change recovered
 		if (channels[rx][ch] != channelsPrevious[rx][ch] && abs(channels[rx][ch] - channelsPrevious[rx][ch]) <= MAX_CHANNEL_INCREASE) {
-			
+
 			if (channelNewMaxChangeTriggered[rx][ch] == true) {
 				channelsMaxChangeMillis[rx][channelsMaxChangeCounter[rx]] = millis() - channelsStartMaxChangeMillis[rx][ch];
 				channelNewMaxChangeTriggered[rx][ch] = false;
-				Serial.print(RX_NAMES[rx]); Serial.print(" CH"); Serial.print(ch); Serial.print(" = "); Serial.print("Significant Change Recovered in ");
+				Serial.print(RX_NAMES[rx]); Serial.print(" CH"); Serial.print(ch+1); Serial.print(" = "); Serial.print("Significant Change Recovered in ");
 				Serial.print(channelsMaxChangeMillis[rx][channelsMaxChangeCounter[rx]]); Serial.println("ms");
-				if (channelsMaxChangeCounter[rx] < 6) { channelsMaxChangeCounter[rx]++; }
+				if (channelsMaxChangeCounter[rx] < 7) { channelsMaxChangeCounter[rx]++; }
 			}
-			
-			//if (channelMaxChangeTriggered[rx][ch] == true) {
-			//	Serial.print(RX_NAMES[rx]); Serial.print(" = "); Serial.println("Significant Change Recovered");
-			//}
-			channelMaxChangeTriggered[rx][ch] = false;
 		}
 
+		// Calculate Wave Direction, 0 = down, 1 = up, no change is not possible here
+		direction = channels[rx][ch] - channelsPrevious[rx][ch];
+		if (direction < 0) {
+			direction = 0;
+		}
+		else {
+			direction = 1;
+		}
+
+		// Store Channel Data for next analysis
 		channelsPrevious[rx][ch] = channels[rx][ch];
 	}
 }
@@ -419,9 +442,6 @@ void check_LostFrame(int rx) {
 		Serial.println("");
 #endif
 		lostFrameDetected[rx] = true;
-		//// TEMP CODE
-		//tempLostFrameStop = true;
-		//tempLostFrameStopMillis = millis();
 	}
 	if (lostFrame[rx] == false && lostFrameDetected[rx] == true) {
 		int temp = millis() - lostFrameStartMillis[rx];
@@ -434,22 +454,15 @@ void check_LostFrame(int rx) {
 #endif
 		lostFrameDetected[rx] = false;
 	}
-	// TEMP CODE
-	//if (tempLostFrameStop == true && millis() - tempLostFrameStopMillis > 2000) {
-	//	Serial.println("lostFrame_STOP");
-	//	while (true) {}
-	//}
-
-
 }
 
 
 //TODO - Check Channel 9 if we have 16 channnels
 void check_BadFrame(int rx) {
 	// Channel Monitoring - Monitor_Channel
-	
+
 	//if there is a processing delay it is detected 4 frames later
-	if (longLoopCounter >= 1 && longLoopCounter <= 10) { channelsPrevious[rx][0] = channels[rx][0]; }
+	if (longLoopCounter >= 1 && longLoopCounter <= 10) { return; }
 
 	// dont count if data is stabilsing
 	if (firstRun == true) {
@@ -457,7 +470,7 @@ void check_BadFrame(int rx) {
 		channelsMaxChange[rx][channelsMaxChangeCounter[rx]] = 0;
 		channelsMaxChangeMillis[rx][channelsMaxChangeCounter[rx]] = 0;
 	}
-	
+
 	uint8_t diff = abs(channels[rx][0] - channelsPrevious[rx][0]);
 	if (diff > 10 * (NUMBER_OF_CH / 8)) {
 		int badFrames = ((float)(abs(channels[rx][0] - channelsPrevious[rx][0])) / (NUMBER_OF_CH / 2)) - 1;
@@ -503,30 +516,31 @@ void check_FailSafe(int rx) {
 // Dumps Previous vs Current Channel information to USB serial.
 void debug_Data(int rx) {
 #if defined(DEBUG_DATA)
-	// detect which channels updated
-	if (abs(channelsPrevious[rx][0] - channels[rx][0]) != 0) {
-		if (abs(channelsPrevious[rx][8] - channels[rx][8]) != 0) {
-			Serial.println("++++++++++++++++++++++++++++++++++");
-			Serial.println("++++++ ALL CHANNELS CHANGED ++++++");
-			Serial.println("++++++++++++++++++++++++++++++++++");
-		}
-		else {
-			Serial.println("");
-			Serial.println("CH1-8 updated - CH9-16 repeated");
-		}
-	}
-	if (abs(channelsPrevious[rx][0] - channels[rx][0]) == 0) {
-		if (abs(channelsPrevious[rx][8] - channels[rx][8]) == 0) {
-			Serial.println("-------------------------------");
-			Serial.println("------ ALL CHANNELS HELD ------");
-			Serial.println("-------------------------------");
-		}
-		else {
-			Serial.println("CH1-8 repeated - CH9-16 updated");
-		}
-	}
+	//// detect which channels updated
+	//if (abs(channelsPrevious[rx][0] - channels[rx][0]) != 0) {
+	//	if (abs(channelsPrevious[rx][8] - channels[rx][8]) != 0) {
+	//		Serial.println("++++++++++++++++++++++++++++++++++");
+	//		Serial.println("++++++ ALL CHANNELS CHANGED ++++++");
+	//		Serial.println("++++++++++++++++++++++++++++++++++");
+	//	}
+	//	else {
+	//		Serial.println("");
+	//		Serial.println("CH1-8 updated - CH9-16 repeated");
+	//	}
+	//}
+	//if (abs(channelsPrevious[rx][0] - channels[rx][0]) == 0) {
+	//	if (abs(channelsPrevious[rx][8] - channels[rx][8]) == 0) {
+	//		Serial.println("-------------------------------");
+	//		Serial.println("------ ALL CHANNELS HELD ------");
+	//		Serial.println("-------------------------------");
+	//	}
+	//	else {
+	//		Serial.println("CH1-8 repeated - CH9-16 updated");
+	//	}
+	//}
 	
-	for (int ch = 0; ch < NUMBER_OF_CH; ch++) {
+	//for (int ch = 0; ch < NUMBER_OF_CH; ch++) {
+		for (int ch = 0; ch < 1; ch++) {
 		Serial.print(RX_NAMES[rx]); Serial.print(" = ");
 		Serial.print("CH"); Serial.print(ch+1); Serial.print(" = ");
 		Serial.print(channelsPrevious[rx][ch]); Serial.print(" vs "); Serial.print(channels[rx][ch]);
@@ -592,6 +606,7 @@ void rx_Telemetry(byte rx, int loopMillis) {
 }
 #endif
 
+#if defined(UPDATE_DISPLAY)
 void servo_MovementVisualiser() {
 	PWMServo myservo;
 	myservo.attach(3, 1000, 2000);
@@ -636,3 +651,4 @@ void servo_MovementVisualiser() {
 		delay(1000);
 	}
 }
+#endif
