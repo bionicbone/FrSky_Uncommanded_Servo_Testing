@@ -395,7 +395,7 @@ void check_ChannelSignificantChange(int rx) {
 		channelHoldCounter[rx]++;
 
 		// If a hold is not in progress and we've captured 100 readings reset the max millis() 
-		if (channelHoldTriggered[rx] = false && channelHoldCounter[rx] >= 100) {
+		if (channelHoldTriggered[rx] == false && channelHoldCounter[rx] >= 100) {
 			channelHoldCounter[rx] = 0;
 			channelsMaxHoldMillis[rx] = 0;
 		}
