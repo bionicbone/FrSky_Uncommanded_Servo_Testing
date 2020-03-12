@@ -12,7 +12,6 @@
 */
 
 // for the ILI9341 display
-
 #include <ili9341_t3n_font_OpenSans.h>
 #include <ili9341_t3n_font_ComicSansMS.h>
 #include <ili9341_t3n_font_ArialBold.h>
@@ -21,6 +20,7 @@
 #include <ILI9341_fonts.h>
 #include <PWMServo.h>
 #include "SPI.h"
+
 // for Pawelsky's FrSky S.PORT Library
 #include <FrSkySportTelemetry.h>
 #include <FrSkySportSingleWireSerial.h>
@@ -35,30 +35,32 @@
 #include <FrSkySportSensor.h>
 #include <FrSkySportPolling.h>
 #include <FrSkySportDecoder.h>
+
 // for the Arduino SBUS phaser
 #include "SBUS.h"
 
 // Config
 const byte NUMBER_OF_CH = 8;							// 8 or 16 channels to scan
-const byte NUMBER_OF_RX = 3;							// Max 2 for Teensy 3.2 / Max 6 for Teensy 4.0
-#define FrSky_SERIAL SERIAL_7							// SERIAL_3 for Teensy 3.2 / SERIAL_7 for Teensy 4.0
+const byte NUMBER_OF_RX = 2;							// Max 2 for Teensy 3.2 / Max 6 for Teensy 4.0
+#define FrSky_SERIAL SERIAL_5							// SERIAL_3 for Teensy 3.2 / SERIAL_7 for Teensy 4.0
 const byte MAX_CHANNEL_INCREASE = 104;			// ~8 per frame, 48 = 6 frames, not less than 10
 
 // Connected Rx Names for Identification, connected to Serial_1, Serial_2, ect...
-const String RX_NAMES[] = { "Rx1-RX4R(v2-FCC)", "Rx2-XM+(v2-FCC)" ,"Rx3-X4R(v2-FCC)", "Rx4-xxx" };
+const String RX_NAMES[] = { "Rx1-X4R(v1-LBT)", "Rx2-XM+(v1-LBT)" ,"Rx3-X8R(v1-LBT)", "Rx4-X8R(v2-LBT)" };
 
 // Program options
 
 // Normally ON
 #define SERIAL_UPDATE										// Send TFT data to USB Serial
-//#define UPDATE_DISPLAY									// Activate the TFT display and update
-//#define SEND_TELEMETRY									// Activate Telemetry and Send
+#define SEND_TELEMETRY									// Activate Telemetry and Send
 
 // Normally OFF
 //#define DEBUG_DATA										// Dump Previous & Current Channel Data to USB
 //#define NO_RX_ATTACHED								// Allow execution like an Rx is attached to Rx1.
 //#define REPORT_ERRORS									// Reports SBUS LostFrame and FailSafe flags
 //#define REPORT_ERRORS_BADFRAMES				// Reports Bad Frames (Frame Holds) on the SBUS.
+//#define UPDATE_DISPLAY								// WARNING: Long Loops!! - Activate the TFT display and update
+
 
 #if defined(UPDATE_DISPLAY)
 // For the Adafruit shield, these are the default.
@@ -77,28 +79,50 @@ SBUS sbusRx4(Serial4);
 // frsky Telemetry setup
 #if defined(SEND_TELEMETRY)
 FrSkySportSensorRpm frskyMainStats(FrSkySportSensor::ID5); 		// Main Stats, frameCounter, Rx Number, LoopMillis
-FrSkySportSensorRpm frskyRx1(FrSkySportSensor::ID15);			// Rx1 Data - badFramesPercentage * 100, channelsLongestMillis, channelsMaxChange
-FrSkySportSensorRpm frskyRx2(FrSkySportSensor::ID16);			// Create RPM sensor with given ID
-FrSkySportSensorRpm frskyRx3(FrSkySportSensor::ID17);			// Create RPM sensor with given ID
-FrSkySportSensorRpm frskyRx4(FrSkySportSensor::ID18);			// Create RPM sensor with given ID
+
+FrSkySportSensorFcs frsky1_1(FrSkySportSensor::ID15);						// Rx1
+FrSkySportSensorFcs frsky1_2(FrSkySportSensor::ID16);						// Rx1
+
+FrSkySportSensorFcs frsky2_1(FrSkySportSensor::ID17);						// Rx2
+FrSkySportSensorFcs frsky2_2(FrSkySportSensor::ID18);						// Rx2
+
+FrSkySportSensorFcs frsky3_1(FrSkySportSensor::ID19);						// Rx3
+FrSkySportSensorFcs frsky3_2(FrSkySportSensor::ID20);						// Rx3
+
+FrSkySportSensorFcs frsky4_1(FrSkySportSensor::ID21);						// Rx4
+FrSkySportSensorFcs frsky4_2(FrSkySportSensor::ID22);						// Rx4
+
+// Temp Code? - SBUS refresh rates
+FrSkySportSensorFcs frskySBUS_1(FrSkySportSensor::ID23);				// Rx1
+FrSkySportSensorFcs frskySBUS_2(FrSkySportSensor::ID24);				// Rx2
+FrSkySportSensorFcs frskySBUS_3(FrSkySportSensor::ID25);				// Rx3
+FrSkySportSensorFcs frskySBUS_4(FrSkySportSensor::ID26);				// Rx4
+
 FrSkySportTelemetry telemetry;									// Create telemetry object without polling
 #endif
 
 
-// channel, fail safe, and lost frames data
-uint16_t  channels[4][16];
-uint16_t  channelsPrevious[4][16];
+// sbus channel frame data
+uint16_t			channels[4][16] = { {0} };							// Call to SBUS populates this
+uint16_t			channelsPrevious[4][16] = { {0} };			// Store the previous SBUS readings so change checks can be preformed
+uint32_t			sbusPrevious_us[4] = { 0 };							// SBUS timings, reset every 100 frames 
+unsigned int	sbusSpeedMin_us[4] = { 0 };							// SBUS timings, reset every 100 frames
+unsigned int	sbusSpeedMax_us[4] = { 0 };							// SBUS timings, reset every 100 frames
 
-// for detecting and timing channel holds and for how long.
-unsigned long  channelsStartHoldMillis[4] = { 0 };
-unsigned long   channelsMaxHoldMillis[4] = { 0 };
-bool channelHoldTriggered[4] = { false };
-unsigned long  channelsStartMaxChangeMillis[4][16] = { { 0 } };
-unsigned long   channelsMaxChangeMillis[4][8] = { { 0 } };
+
+// for detecting and timing channel holds and for how long
+unsigned long		channelsStartHoldMillis[4] = { 0 };		// Stores millis() when hold is first detected 
+unsigned long		channelsMaxHoldMillis[4] = { 0 };			// Stores max millis() for every 100 readings
+bool						channelHoldTriggered[4] = { false };	// Tracks current status
+int							channelHoldCounter[4] = { 0 };				// Tracks reset after 100 readings
+
+
+unsigned long  channelsStartMaxChangeMillis[4][16] = { {0} };
+unsigned long   channelsMaxChangeMillis[4][8] = { {0} };
 bool channelMaxChangeTriggered[4][16] = { { false } };
-uint16_t channelsMaxChange[4][8] = { { 0 } };
+uint16_t channelsMaxChange[4][8] = { {0} };
 int channelsMaxChangeCounter[4] = { 0 };
-bool channelNewMaxChangeTriggered[4][16] = { { false } };
+bool channelNewMaxChangeTriggered[4][16] = { {false} };
 
 
 //int totalLoops = 0;										// Simple Counter based on 9ms Loops
@@ -107,10 +131,10 @@ bool channelNewMaxChangeTriggered[4][16] = { { false } };
 int totalValidFramesCounter[4] = { 0 };
 int badFramesCounter[4] = { 0 };
 float badFramesPercentage[4] = { 0 };
+int badFramesPercentage100Counter[4] = { 0 };
+int badFramesPercentage100Array[4][100] = { {0} };
+float badFramesPercentage100Result[4] = { 0 };
 int direction = 0;
-
-// SBUS Speed
-int sbusSpeed_uS[4] = { 0 };
 
 // monitoring SBUS fail safe flag as set by Rx
 bool failSafe[4] = { false };
@@ -122,14 +146,18 @@ int failSafeLongestMillis[4] = { 0 };
 // monitoring SBUS lost frame flag as set by Rx
 bool lostFrame[4] = { false };
 int lostFrameCounter[4] = { 0 };
+int lostFramesPercentage100Counter[4] = { 0 };
+int lostFramesPercentage100Array[4][100] = { {0} };
+float lostFramesPercentage100Result[4] = { 0 };
 bool lostFrameDetected[4] = { false };
 unsigned long lostFrameStartMillis[4] = { 0 };
 int lostFrameLongestMillis[4] = { 0 };
 
-bool firstRun = true;								// used to allow everything to stabilize for the first x frames
+bool firstRun = true;									// used to allow everything to stabilize for the first x frames
 bool updateDisplay = false;
 bool updateSerial = false;
 
+unsigned long loopMillis = 0;					//Monitors the Loop Time
 bool longLoop = false;								//if there is a processing delay it corrupts the data 4 frames later
 byte longLoopCounter = 0;
 bool sbusData = false;
@@ -164,16 +192,21 @@ void setup()
 
 #if defined(SEND_TELEMETRY)
 	// begin FrSky Telemetry
-	telemetry.begin(FrSkySportSingleWireSerial::FrSky_SERIAL, &frskyMainStats, &frskyRx1, &frskyRx2, &frskyRx3, &frskyRx4);
+	//telemetry.begin(FrSkySportSingleWireSerial::FrSky_SERIAL, &frskyMainStats, &frskyRx1, &frskyRx2, &frskyRx3, &frskyRx4);
+	telemetry.begin(FrSkySportSingleWireSerial::FrSky_SERIAL, &frskyMainStats, &frsky1_1, &frsky1_2, &frsky2_1, &frsky2_2, &frsky3_1, &frsky3_2, &frsky4_1, &frsky4_2, &frskySBUS_1, &frskySBUS_2, &frskySBUS_3, &frskySBUS_4);
+
+	
 #endif
 
 	//servo_MovementVisualiser();
+
+	//Sbus_Scan_Speed();
 }
 
 
 void loop()
 {
-	unsigned long loopMillis = millis();
+	loopMillis = millis();
 
 	if (totalValidFramesCounter[0] > 10000) { firstRun = false; } // Allow everything to stabilse
 
@@ -237,7 +270,7 @@ void loop()
 
 	// FrSky Telemetery
 #if defined(SEND_TELEMETRY)
-	rx_Telemetry(99, millis() - loopMillis);				 
+	rx_Telemetry(0, millis() - loopMillis);				 
 #endif
 
 	//totalLoops++; 
@@ -246,9 +279,17 @@ void loop()
 
 // Controls what processes should be exectutes for each Rx
 void do_Stuff(int rx) {
+	if (micros() - sbusPrevious_us[rx] < sbusSpeedMin_us[rx]) {
+		sbusSpeedMin_us[rx] = micros() - sbusPrevious_us[rx];
+	}
+	if (micros() - sbusPrevious_us[rx] > sbusSpeedMax_us[rx]) {
+		sbusSpeedMax_us[rx] = micros() - sbusPrevious_us[rx];
+	}
+	sbusPrevious_us[rx] = micros();
+	
 	totalValidFramesCounter[rx]++;
 	sbusData = true;
-	
+
 	check_FailSafe(rx);
 	check_LostFrame(rx);
 	//if (rx == 0) { check_LostFrame(rx); }
@@ -265,10 +306,10 @@ void do_Stuff(int rx) {
 
 	// Only update the display every 1000 frame due to processing time
 	if (rx == 0 && (float)totalValidFramesCounter[0] / 1000 == int((float)totalValidFramesCounter[0] / 1000)) { updateSerial = true; }
-	if (rx==0 && (float)totalValidFramesCounter[0] / 5000 == int((float)totalValidFramesCounter[0] / 5000)) { updateDisplay = true; }
+	if (rx == 0 && (float)totalValidFramesCounter[0] / 5000 == int((float)totalValidFramesCounter[0] / 5000)) { updateDisplay = true; }
 	if (updateSerial == true) { Serial_Update(); }
 #if defined (UPDATE_DISPLAY)
-	if (updateDisplay ==true) { display_Update(); }
+	if (updateDisplay == true) { display_Update(); }
 #endif
 	updateSerial = false;
 	updateDisplay = false;
@@ -292,11 +333,11 @@ void display_Update() {
 		tft.setFont(Arial_8);
 		tft.print("SF "); tft.print(totalValidFramesCounter[rx]);
 		//tft.print(",  SBUS Speed "); tft.print(sbusSpeed_uS[rx]); tft.println("us");
-		tft.print(",  BF "); tft.print(badFramesCounter[rx]); tft.print(", BF "); tft.print(badFramesPercentage[rx]); tft.println("%");
+		tft.print(",  BF "); tft.print(badFramesCounter[rx]); tft.print(", BF "); tft.print(badFramesPercentage100Result[rx]); tft.println("%");
 		tft.print("FS "); tft.print(failSafeCounter[rx]); 
 		tft.print(",  FSM "); tft.print(failSafeLongestMillis[rx]); tft.print("ms, ");
-		tft.print("LF "); tft.print(lostFrameCounter[rx]);
-		tft.print(",  LFM "); tft.print(lostFrameLongestMillis[rx]); tft.print("ms");
+		tft.print("LF "); tft.print(lostFramesPercentage100Result[rx]);
+		tft.print("%,  LFM "); tft.print(lostFrameLongestMillis[rx]); tft.print("ms");
 		tft.print(",  CHM "); tft.print(channelsMaxHoldMillis[rx]); tft.println("ms");
 		tft.print("SD "); tft.print((float)channelsMaxChange[rx][0] / 2000 * 100); tft.print("% :"); 
 		for (int sd = 0; sd < 8; sd++) {
@@ -318,12 +359,12 @@ void Serial_Update() {
 	for (int rx = 0; rx < NUMBER_OF_RX; rx++) {
 		Serial.println(RX_NAMES[rx]);
 		Serial.print("SF "); Serial.print(totalValidFramesCounter[rx]);
-		//Serial.print(",  SBUS Speed "); Serial.print(sbusSpeed_uS[rx]); Serial.println("us");
-		Serial.print(",  BF "); Serial.print(badFramesCounter[rx]); Serial.print(", BF "); Serial.print(badFramesPercentage[rx]); Serial.println("%");
+		Serial.print(",  SBUS Speed "); Serial.print(sbusSpeedMin_us[rx]); Serial.print("-"); Serial.print(sbusSpeedMax_us[rx]); Serial.println("us");
+		Serial.print(",  BF "); Serial.print(badFramesCounter[rx]); Serial.print(", BF "); Serial.print(badFramesPercentage100Result[rx]); Serial.println("%");
 		Serial.print("FS "); Serial.print(failSafeCounter[rx]);
 		Serial.print(",  FSM "); Serial.print(failSafeLongestMillis[rx]); Serial.print("ms, ");
-		Serial.print("LF "); Serial.print(lostFrameCounter[rx]);
-		Serial.print(",  LFM "); Serial.print(lostFrameLongestMillis[rx]); Serial.print("ms");
+		Serial.print("LF "); Serial.print(lostFramesPercentage100Result[rx]);
+		Serial.print("%,  LFM "); Serial.print(lostFrameLongestMillis[rx]); Serial.print("ms");
 		Serial.print(",  CHM "); Serial.print(channelsMaxHoldMillis[rx]); Serial.println("ms");
 		Serial.print("SD "); 
 		
@@ -341,14 +382,25 @@ void Serial_Update() {
 void check_ChannelSignificantChange(int rx) {
 	for (int ch = 0; ch < NUMBER_OF_CH; ch++) {
 
+		// Initially keep everything at Zero to allow things to stabilise 
 		if (firstRun == true) {
 			channelsPrevious[rx][ch] = channels[rx][ch];
 			channelsMaxChange[rx][channelsMaxChangeCounter[rx]] = 0;
 			channelsMaxChangeMillis[rx][channelsMaxChangeCounter[rx]] = 0;
+			channelHoldCounter[rx] = 0;
+			channelsMaxHoldMillis[rx] = 0;
 		}
 
+		// Handle channel holds
+		channelHoldCounter[rx]++;
 
-		// detect channel hold
+		// If a hold is not in progress and we've captured 100 readings reset the max millis() 
+		if (channelHoldTriggered[rx] = false && channelHoldCounter[rx] >= 100) {
+			channelHoldCounter[rx] = 0;
+			channelsMaxHoldMillis[rx] = 0;
+		}
+
+		// Detect a new hold
 		if (channels[rx][ch] == channelsPrevious[rx][ch] && channelHoldTriggered[rx] == false && firstRun == false) {
 			//Serial.print(RX_NAMES[rx]); Serial.print(" = "); Serial.println("Channel Hold");
 			//Serial.print("Pre"); Serial.print(rx+1); Serial.print(" = "); Serial.println(channelsPrevious[rx][ch]);
@@ -356,6 +408,8 @@ void check_ChannelSignificantChange(int rx) {
 			channelHoldTriggered[rx] = true;
 			channelsStartHoldMillis[rx] = millis();
 		}
+		
+		// Detect when a hold ends
 		if (channels[rx][ch] != channelsPrevious[rx][ch] && channelHoldTriggered[rx] == true) {
 			if (millis() - channelsStartHoldMillis[rx] > channelsMaxHoldMillis[rx]) {
 				channelsMaxHoldMillis[rx] = millis() - channelsStartHoldMillis[rx];
@@ -364,7 +418,7 @@ void check_ChannelSignificantChange(int rx) {
 			channelHoldTriggered[rx] = false;
 			channelsPrevious[rx][ch] = channels[rx][ch];  // After a hold dont count a significant change
 		}
-
+		
 		// After many tests its concluded that a "Display Update" creates a significant
 		// long loop. Normally longLoopCounters >=3 or <=8 find "significant changes".
 		// Given its not the same each time then its better to ignore the next 10 readings.
@@ -374,9 +428,14 @@ void check_ChannelSignificantChange(int rx) {
 
 		// detect channel significant change
 		if (abs(channels[rx][ch] - channelsPrevious[rx][ch]) > MAX_CHANNEL_INCREASE && channelMaxChangeTriggered[rx][ch] == false) {
-
+			channelMaxChangeTriggered[rx][ch] = true;
+			
+			// need to leave this test in as the last array slot can be overwritten if the buffer is full
 			if (abs(channels[rx][ch] - channelsPrevious[rx][ch]) > channelsMaxChange[rx][channelsMaxChangeCounter[rx]]) {
+				// start the timer
 				channelsStartMaxChangeMillis[rx][ch] = millis();
+				
+				// dump some data for analysis
 				Serial.print("__________________"); Serial.print(RX_NAMES[rx]); Serial.print(" = "); Serial.println("Significant Change");
 				Serial.print("__________________Frame"); Serial.print(" = "); Serial.println(totalValidFramesCounter[rx]);
 				Serial.print("__________________LongLoop"); Serial.print(" = "); Serial.println(longLoop);
@@ -386,9 +445,12 @@ void check_ChannelSignificantChange(int rx) {
 				Serial.print("__________________New Max Change = "); Serial.println(abs(channels[rx][ch] - channelsPrevious[rx][ch]));
 				Serial.print("__________________Directon (0=down,1=up) = "); Serial.println(direction);
 				Serial.print("__________________millis() CH"); Serial.print(ch+1); Serial.print(" = "); Serial.println(channelsStartMaxChangeMillis[rx][ch]);
+				
+				// store the absolute value of the change
 				channelsMaxChange[rx][channelsMaxChangeCounter[rx]] = abs(channels[rx][ch] - channelsPrevious[rx][ch]);
 				channelNewMaxChangeTriggered[rx][ch] = true;
 
+				// dump channel data for analysis
 				for (int ch = 0; ch < NUMBER_OF_CH; ch++) {
 					Serial.print(RX_NAMES[rx]); Serial.print(" = ");
 					Serial.print("CH"); Serial.print(ch + 1); Serial.print(" = ");
@@ -397,13 +459,10 @@ void check_ChannelSignificantChange(int rx) {
 					Serial.print(" LongLoop "); Serial.println(longLoopCounter);
 				}
 			}
-
-			channelMaxChangeTriggered[rx][ch] = true;
 		}
 
-		// has the significant change recovered
+		// has the significant change recovered record the timing
 		if (channels[rx][ch] != channelsPrevious[rx][ch] && abs(channels[rx][ch] - channelsPrevious[rx][ch]) <= MAX_CHANNEL_INCREASE) {
-
 			if (channelNewMaxChangeTriggered[rx][ch] == true) {
 				channelsMaxChangeMillis[rx][channelsMaxChangeCounter[rx]] = millis() - channelsStartMaxChangeMillis[rx][ch];
 				channelNewMaxChangeTriggered[rx][ch] = false;
@@ -427,11 +486,11 @@ void check_ChannelSignificantChange(int rx) {
 	}
 }
 
-//TODO - Remove Temp Code
+
 // Checks the Lost Frmae flag in the SBUS
 void check_LostFrame(int rx) {
-	// lostFrame
 
+	// check for new lost frame
 	if (lostFrame[rx] == true && lostFrameDetected[rx] == false) {
 		lostFrameStartMillis[rx] = millis();
 		lostFrameCounter[rx]++;
@@ -442,7 +501,15 @@ void check_LostFrame(int rx) {
 		Serial.println("");
 #endif
 		lostFrameDetected[rx] = true;
+
+		// Calculate based on last 100 frames.
+		lostFramesPercentage100Array[rx][lostFramesPercentage100Counter[rx]] = 1;
 	}
+	else {
+		lostFramesPercentage100Array[rx][lostFramesPercentage100Counter[rx]] = 0;
+	}
+
+	// check for lost frame recovery and record the timing
 	if (lostFrame[rx] == false && lostFrameDetected[rx] == true) {
 		int temp = millis() - lostFrameStartMillis[rx];
 		if (temp > lostFrameLongestMillis[rx])  lostFrameLongestMillis[rx] = temp;
@@ -454,28 +521,47 @@ void check_LostFrame(int rx) {
 #endif
 		lostFrameDetected[rx] = false;
 	}
+
+	// work out the lost frame percentage over the last 100 frames
+	lostFramesPercentage100Counter[rx]++;
+	if (lostFramesPercentage100Counter[rx] >= 100)  lostFramesPercentage100Counter[rx] = 0;
+	lostFramesPercentage100Result[rx] = 0;
+	for (int i = 0; i < 100; i++) {
+		lostFramesPercentage100Result[rx] += lostFramesPercentage100Array[rx][i];
+	}
+	if (lostFramesPercentage100Result[rx] > 100) lostFramesPercentage100Result[rx] = 100;
+	lostFramesPercentage100Result[rx] = 100 - lostFramesPercentage100Result[rx];
 }
 
 
 //TODO - Check Channel 9 if we have 16 channnels
+//TODO - Need to find a way to check if we are receiving frame 1-8 or 9-16
 void check_BadFrame(int rx) {
 	// Channel Monitoring - Monitor_Channel
 
-	//if there is a processing delay it is detected 4 frames later
+	// TODO - can all this be moved to "do_stuff" so that nothing is called if there was a loop delay?
+	//if there is a processing delay ingnore 10 frames
 	if (longLoopCounter >= 1 && longLoopCounter <= 10) { return; }
 
 	// dont count if data is stabilsing
 	if (firstRun == true) {
 		channelsPrevious[rx][0] = channels[rx][0];
+		channelsPrevious[rx][8] = channels[rx][8];
 		channelsMaxChange[rx][channelsMaxChangeCounter[rx]] = 0;
 		channelsMaxChangeMillis[rx][channelsMaxChangeCounter[rx]] = 0;
 	}
 
+	// work out the bad frame percentage over the last 100 frames
 	uint8_t diff = abs(channels[rx][0] - channelsPrevious[rx][0]);
 	if (diff > 10 * (NUMBER_OF_CH / 8)) {
-		int badFrames = ((float)(abs(channels[rx][0] - channelsPrevious[rx][0])) / (NUMBER_OF_CH / 2)) - 1;
+		int badFrames = ((float)(abs(channels[rx][0] - channelsPrevious[rx][0])) / (8 * (NUMBER_OF_CH / 8))) - 1;
 		badFramesCounter[rx] += badFrames;
+		// Calculate overall bad frames %
 		badFramesPercentage[rx] = 100 - (((float)badFramesCounter[rx] / totalValidFramesCounter[rx]) * 100);
+		// Calculate based on last 100 frames.
+		badFramesPercentage100Array[rx][badFramesPercentage100Counter[rx]] = badFrames;
+
+
 #if defined(REPORT_ERRORS_BADFRAMES)
 		Serial.print(RX_NAMES[rx]); Serial.print(" = ");
 		Serial.print("CH"); Serial.print(0); Serial.print(" = ");
@@ -484,13 +570,28 @@ void check_BadFrame(int rx) {
 		Serial.print("badFrames Calculated = "); Serial.println(badFrames);
 #endif
 	}
+	else { badFramesPercentage100Array[rx][badFramesPercentage100Counter[rx]] = 0;
+	}
+	badFramesPercentage100Counter[rx]++;
+	if (badFramesPercentage100Counter[rx] >= 100) { 
+		badFramesPercentage100Counter[rx] = 0; 
+		// also use this time to reset the SBUS timers
+		sbusSpeedMin_us[rx] = 9000;
+		sbusSpeedMax_us[rx] = 9000;
+	}
+	badFramesPercentage100Result[rx] = 0;
+	for (int i = 0; i < 100; i++) {
+		badFramesPercentage100Result[rx] += badFramesPercentage100Array[rx][i];
+	}
+	if (badFramesPercentage100Result[rx] > 100) badFramesPercentage100Result[rx] = 100;
+	badFramesPercentage100Result[rx] = 100 - badFramesPercentage100Result[rx];
 }
 
 
 // Checks the fail safe flag in the SBUS
 void check_FailSafe(int rx) {
 
-	// failSafe
+	// check for new fail safe
 	if (failSafe[rx] == true && failSafeDetected[rx] == false) {
 		failSafeStartMillis[rx] = millis();
 		failSafeCounter[rx]++;
@@ -500,6 +601,8 @@ void check_FailSafe(int rx) {
 #endif
 		failSafeDetected[rx] = true;
 	}
+	
+	// check for fail safe recovery and record the timing
 	if (failSafe[rx] == false && failSafeDetected[rx] == true) {
 		int temp = millis() - failSafeStartMillis[rx];
 		if (temp > failSafeLongestMillis[rx])  failSafeLongestMillis[rx] = temp;
@@ -570,44 +673,48 @@ void debug_RxUpdate(int rx) {
 
 
 // Transmits all the telemetry information for basic Tx monitoring
-#if defined(SEND_TELEMETRY)
 void rx_Telemetry(byte rx, int loopMillis) {
+#if defined(SEND_TELEMETRY)
 	// Procedure will populate the telemetry control and then call the send data routine
 
 	// Set RPM/temperature sensor data
 	// (set number of blades to 2 in telemetry menu to get correct totalLoops value)
 
 	// ID 5
-	frskyMainStats.setData(999,							// Total Frames based on Loop Counter (Rx does not announce)
-		rx,												// Rx number, 99 = wait loop
+	frskyMainStats.setData(totalValidFramesCounter[0] / 1000,							// Total Frames based on Loop Counter (Rx does not announce)
+		rx + 1,												// Rx number, 0 = wait loop
 		loopMillis);									// Loop execution time (before delay)
 
-		// ID 15 - Rx1
-	frskyRx1.setData(badFramesPercentage[0] * 100,
-		channelsMaxChangeMillis[0][channelsMaxChangeCounter[0]],
-		channelsMaxChange[0][channelsMaxChangeCounter[0]]);
+	// ID 15 & ID 16 - Rx1 - Data Set 1 & 2
+	frsky1_1.setData(badFramesPercentage100Result[0], lostFramesPercentage100Result[0]);
+	frsky1_2.setData(channelsMaxHoldMillis[0], channelsMaxChangeCounter[0]);
 
-	// ID 16 - Rx2
-	frskyRx2.setData(badFramesPercentage[1] * 100,
-		channelsMaxChangeMillis[1][channelsMaxChangeCounter[1]],
-		channelsMaxChange[1][channelsMaxChangeCounter[1]]);
+	// ID 17 & ID 18 - Rx2 - Data Set 1 & 2
+	frsky2_1.setData(badFramesPercentage100Result[1], lostFramesPercentage100Result[1]);
+	frsky2_2.setData(channelsMaxHoldMillis[1], channelsMaxChangeCounter[1]);
 
-	// ID 17 - Rx3
-	frskyRx3.setData(badFramesPercentage[2] * 100,
-		channelsMaxChangeMillis[2][channelsMaxChangeCounter[2]],
-		channelsMaxChange[2][channelsMaxChangeCounter[2]]);
+	// ID 19 & ID 20 - Rx3 - Data Set 1 & 2
+	frsky3_1.setData(badFramesPercentage100Result[2], lostFramesPercentage100Result[2]);
+	frsky3_2.setData(channelsMaxHoldMillis[2], channelsMaxChangeCounter[2]);
 
-	// ID 18 - Rx4
-	frskyRx4.setData(badFramesPercentage[3] * 100,
-		channelsMaxChangeMillis[3][channelsMaxChangeCounter[3]],
-		channelsMaxChange[3][channelsMaxChangeCounter[3]]);
+	// ID 21 & ID 22 - Rx4 - Data Set 1 & 2
+	frsky4_1.setData(badFramesPercentage100Result[3], lostFramesPercentage100Result[3]);
+	frsky4_2.setData(channelsMaxHoldMillis[3], channelsMaxChangeCounter[3]);
+
+	// Temp Code?  -  Send SBUS refresh rates
+	// ID 23, 24, 25, 26
+	frskySBUS_1.setData(sbusSpeedMin_us[0], sbusSpeedMax_us[0]);
+	frskySBUS_2.setData(sbusSpeedMin_us[1], sbusSpeedMax_us[1]);
+	frskySBUS_3.setData(sbusSpeedMin_us[2], sbusSpeedMax_us[2]);
+	frskySBUS_4.setData(sbusSpeedMin_us[3], sbusSpeedMax_us[3]);
 
 	telemetry.send();
-}
 #endif
+}
 
-#if defined(UPDATE_DISPLAY)
+
 void servo_MovementVisualiser() {
+#if defined(UPDATE_DISPLAY)
 	PWMServo myservo;
 	myservo.attach(3, 1000, 2000);
 	
@@ -650,5 +757,23 @@ void servo_MovementVisualiser() {
 		}
 		delay(1000);
 	}
-}
 #endif
+}
+
+
+void Sbus_Scan_Speed() {
+	uint32_t previousMicros = micros();
+	int i = 0;
+	while (i < 5000) {
+		while (sbusRx2.read(&channels[0][0], &failSafe[0], &lostFrame[0]) == true) {
+			Serial.println(micros() - previousMicros);
+			previousMicros = micros();
+			i++;
+		}
+	}
+	while (1);
+}
+
+void stop() {
+	while (1);
+}
