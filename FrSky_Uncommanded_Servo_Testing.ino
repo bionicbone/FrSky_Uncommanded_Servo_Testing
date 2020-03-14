@@ -46,7 +46,7 @@ const byte NUMBER_OF_RX = 2;							// Max 2 for Teensy 3.2 / Max 6 for Teensy 4.
 const byte MAX_CHANNEL_INCREASE = 104;			// ~8 per frame, 48 = 6 frames, not less than 10
 
 // Connected Rx Names for Identification, connected to Serial_1, Serial_2, ect...
-const String RX_NAMES[] = { "Rx1-X4R(v1-LBT)", "Rx2-XM+(v1-LBT)" ,"Rx3-X8R(v1-LBT)", "Rx4-X8R(v2-LBT)" };
+const String RX_NAMES[] = { "Rx1-X4R(v2-LBT)", "Rx2-XM+(v2-LBT)" ,"Rx3-X8R(v1-LBT)", "Rx4-X8R(v2-LBT)" };
 
 // Program options
 
@@ -55,9 +55,9 @@ const String RX_NAMES[] = { "Rx1-X4R(v1-LBT)", "Rx2-XM+(v1-LBT)" ,"Rx3-X8R(v1-LB
 #define SEND_TELEMETRY									// Activate Telemetry and Send
 
 // Normally OFF
-//#define DEBUG_DATA										// Dump Previous & Current Channel Data to USB
+#define DEBUG_DATA										// Dump Previous & Current Channel Data to USB
 //#define NO_RX_ATTACHED								// Allow execution like an Rx is attached to Rx1.
-//#define REPORT_ERRORS									// Reports SBUS LostFrame and FailSafe flags
+#define REPORT_ERRORS									// Reports SBUS LostFrame and FailSafe flags
 //#define REPORT_ERRORS_BADFRAMES				// Reports Bad Frames (Frame Holds) on the SBUS.
 //#define UPDATE_DISPLAY								// WARNING: Long Loops!! - Activate the TFT display and update
 
@@ -113,7 +113,7 @@ unsigned int	sbusSpeedMax_us[4] = { 0 };							// SBUS timings, reset every 100 
 // for detecting and timing channel holds and for how long
 unsigned long		channelsStartHoldMillis[4] = { 0 };		// Stores millis() when hold is first detected 
 unsigned long		channelsMaxHoldMillis[4] = { 0 };			// Stores max millis() for every 100 readings
-bool						channelHoldTriggered[4] = { false };	// Tracks current status
+bool						channelHoldTriggered[4][16] = { false };	// Tracks current status
 int							channelHoldCounter[4] = { 0 };				// Tracks reset after 100 readings
 
 
@@ -208,7 +208,7 @@ void loop()
 {
 	loopMillis = millis();
 
-	if (totalValidFramesCounter[0] > 10000) { firstRun = false; } // Allow everything to stabilse
+	if (totalValidFramesCounter[0] > 1000) { firstRun = false; } // Allow everything to stabilse
 
 #if!defined(NO_RX_ATTACHED)
 	// Cycle through each Rx
@@ -290,13 +290,16 @@ void do_Stuff(int rx) {
 	totalValidFramesCounter[rx]++;
 	sbusData = true;
 
+	// TODO - Remove Temp Code
+	//if (rx == 1 && (float)totalValidFramesCounter[0] / 9000 == int((float)totalValidFramesCounter[0] / 9000)) { channels[rx][0] = 0; }
+
 	check_FailSafe(rx);
 	check_LostFrame(rx);
 	//if (rx == 0) { check_LostFrame(rx); }
 
 #if defined(DEBUG_DATA)
-	debug_Data(rx);
-	//if (rx == 0) { debug_Data(rx); }
+	//debug_Data(rx);
+	if (rx == 1) { debug_Data(rx); }
 #endif
 	check_BadFrame(rx);
 	// Must proccess this last as it updates the previousChannel variable
@@ -314,6 +317,7 @@ void do_Stuff(int rx) {
 	updateSerial = false;
 	updateDisplay = false;
 }
+
 
 // Updates the ILI9341 display
 // WARNING: Long Process !!
@@ -352,9 +356,11 @@ void display_Update() {
 }
 #endif
 
+
 // Update the USB Serial Monitor
 void Serial_Update() {
 #if defined(SERIAL_UPDATE)
+	bool shouldStop = false;
 	Serial.println("");
 	for (int rx = 0; rx < NUMBER_OF_RX; rx++) {
 		Serial.println(RX_NAMES[rx]);
@@ -371,8 +377,10 @@ void Serial_Update() {
 		for (int sd = 0; sd < 8; sd++) {
 			Serial.print((float)channelsMaxChange[rx][sd] / 2000 * 100); Serial.print("% :");
 			Serial.print(channelsMaxChangeMillis[rx][sd]); Serial.print("ms, ");
+			if (channelsMaxChangeMillis[rx][sd] > 0) { shouldStop = true; }
 		}
 		Serial.println("");
+		if (shouldStop == true) { stop(); }
 	}
 #endif
 }
@@ -395,27 +403,31 @@ void check_ChannelSignificantChange(int rx) {
 		channelHoldCounter[rx]++;
 
 		// If a hold is not in progress and we've captured 100 readings reset the max millis() 
-		if (channelHoldTriggered[rx] == false && channelHoldCounter[rx] >= 100) {
+		if (channelHoldTriggered[rx][ch] == false && channelHoldCounter[rx] >= 100) {
 			channelHoldCounter[rx] = 0;
 			channelsMaxHoldMillis[rx] = 0;
 		}
 
 		// Detect a new hold
-		if (channels[rx][ch] == channelsPrevious[rx][ch] && channelHoldTriggered[rx] == false && firstRun == false) {
+		//Serial.print(" HoldTrigger = "); Serial.print(channelHoldTriggered[rx][ch]);
+		//Serial.print(" FirstRun = "); Serial.print(firstRun);
+		if (channels[rx][ch] == channelsPrevious[rx][ch] && channelHoldTriggered[rx][ch] == false && firstRun == false) {
 			//Serial.print(RX_NAMES[rx]); Serial.print(" = "); Serial.println("Channel Hold");
+			if (rx == 1) { Serial.print(RX_NAMES[rx]); Serial.print(" = "); Serial.println("Channel Hold"); }
 			//Serial.print("Pre"); Serial.print(rx+1); Serial.print(" = "); Serial.println(channelsPrevious[rx][ch]);
 			//Serial.print("New"); Serial.print(rx+1); Serial.print(" = "); Serial.println(channels[rx][ch]);
-			channelHoldTriggered[rx] = true;
+			channelHoldTriggered[rx][ch] = true;
 			channelsStartHoldMillis[rx] = millis();
 		}
 		
 		// Detect when a hold ends
-		if (channels[rx][ch] != channelsPrevious[rx][ch] && channelHoldTriggered[rx] == true) {
+		if (channels[rx][ch] != channelsPrevious[rx][ch] && channelHoldTriggered[rx][ch] == true) {
 			if (millis() - channelsStartHoldMillis[rx] > channelsMaxHoldMillis[rx]) {
 				channelsMaxHoldMillis[rx] = millis() - channelsStartHoldMillis[rx];
 			}
-			//Serial.print(RX_NAMES[rx]);  Serial.print(" = "); Serial.println("Channel Hold Recovered");
-			channelHoldTriggered[rx] = false;
+			//Serial.print(RX_NAMES[rx]);  Serial.print(" = "); Serial.print("Channel Hold Recovered "); Serial.print(channelsMaxHoldMillis[rx]); Serial.println("ms");
+			if (rx == 1) { Serial.print(RX_NAMES[rx]);  Serial.print(" = "); Serial.print("Channel Hold Recovered "); Serial.print(channelsMaxHoldMillis[rx]); Serial.println("ms"); }
+			channelHoldTriggered[rx][ch] = false;
 			channelsPrevious[rx][ch] = channels[rx][ch];  // After a hold dont count a significant change
 		}
 		
@@ -443,7 +455,7 @@ void check_ChannelSignificantChange(int rx) {
 				Serial.print("__________________Pre CH"); Serial.print(ch+1); Serial.print(" = "); Serial.println(channelsPrevious[rx][ch]);
 				Serial.print("__________________New CH"); Serial.print(ch+1); Serial.print(" = "); Serial.println(channels[rx][ch]);
 				Serial.print("__________________New Max Change = "); Serial.println(abs(channels[rx][ch] - channelsPrevious[rx][ch]));
-				Serial.print("__________________Directon (0=down,1=up) = "); Serial.println(direction);
+				//Serial.print("__________________Directon (0=down,1=up) = "); Serial.println(direction);
 				Serial.print("__________________millis() CH"); Serial.print(ch+1); Serial.print(" = "); Serial.println(channelsStartMaxChangeMillis[rx][ch]);
 				
 				// store the absolute value of the change
@@ -455,8 +467,8 @@ void check_ChannelSignificantChange(int rx) {
 					Serial.print(RX_NAMES[rx]); Serial.print(" = ");
 					Serial.print("CH"); Serial.print(ch + 1); Serial.print(" = ");
 					Serial.print(channelsPrevious[rx][ch]); Serial.print(" vs "); Serial.print(channels[rx][ch]);
-					Serial.print(" = "); Serial.print(channelsPrevious[rx][ch] - channels[rx][ch]);
-					Serial.print(" LongLoop "); Serial.println(longLoopCounter);
+					Serial.print(" = "); Serial.println(channelsPrevious[rx][ch] - channels[rx][ch]);
+					//Serial.print(" LongLoop "); Serial.println(longLoopCounter);
 				}
 			}
 		}
@@ -477,7 +489,7 @@ void check_ChannelSignificantChange(int rx) {
 		if (direction < 0) {
 			direction = 0;
 		}
-		else {
+		else if (direction > 0) {
 			direction = 1;
 		}
 
@@ -647,8 +659,9 @@ void debug_Data(int rx) {
 		Serial.print(RX_NAMES[rx]); Serial.print(" = ");
 		Serial.print("CH"); Serial.print(ch+1); Serial.print(" = ");
 		Serial.print(channelsPrevious[rx][ch]); Serial.print(" vs "); Serial.print(channels[rx][ch]);
-		Serial.print(" = "); Serial.print(channelsPrevious[rx][ch] - channels[rx][ch]);
-		Serial.print(" LongLoop "); Serial.println(longLoopCounter);
+		Serial.print(" = "); Serial.println(channelsPrevious[rx][ch] - channels[rx][ch]);
+		//Serial.print(" LongLoop "); Serial.println(longLoopCounter);
+		//Serial.print(" Direction "); Serial.println(direction);
 	}
 #endif
 }
@@ -773,6 +786,7 @@ void Sbus_Scan_Speed() {
 	}
 	while (1);
 }
+
 
 void stop() {
 	while (1);
