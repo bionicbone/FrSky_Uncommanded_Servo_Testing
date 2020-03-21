@@ -40,13 +40,13 @@
 #include "SBUS.h"
 
 // Config
-const byte NUMBER_OF_CH = 8;							// 8 or 16 channels to scan
-const byte NUMBER_OF_RX = 2;							// Max 2 for Teensy 3.2 / Max 6 for Teensy 4.0
+const byte NUMBER_OF_CH = 16;							// 8 or 16 channels to scan
+const byte NUMBER_OF_RX = 4;							// Max 2 for Teensy 3.2 / Max 6 for Teensy 4.0
 #define FrSky_SERIAL SERIAL_5							// SERIAL_3 for Teensy 3.2 / SERIAL_7 for Teensy 4.0
 const byte MAX_CHANNEL_INCREASE = 104;			// ~8 per frame, 48 = 6 frames, not less than 10
 
 // Connected Rx Names for Identification, connected to Serial_1, Serial_2, ect...
-const String RX_NAMES[] = { "Rx1-X4R(v2-LBT)", "Rx2-XM+(v2-LBT)" ,"Rx3-X8R(v1-LBT)", "Rx4-X8R(v2-LBT)" };
+const String RX_NAMES[] = { "Rx1-X4R(v2.1.0-LBT)", "Rx2-XM+(v2.1.0-LBT)" ,"Rx3-RX4R(v2.1.0-LBT)", "Rx4-X8R(v2.1.0-LBT)" };
 
 // Program options
 
@@ -55,7 +55,7 @@ const String RX_NAMES[] = { "Rx1-X4R(v2-LBT)", "Rx2-XM+(v2-LBT)" ,"Rx3-X8R(v1-LB
 #define SEND_TELEMETRY									// Activate Telemetry and Send
 
 // Normally OFF
-#define DEBUG_DATA										// Dump Previous & Current Channel Data to USB
+//#define DEBUG_DATA										// Dump Previous & Current Channel Data to USB
 //#define NO_RX_ATTACHED								// Allow execution like an Rx is attached to Rx1.
 #define REPORT_ERRORS									// Reports SBUS LostFrame and FailSafe flags
 //#define REPORT_ERRORS_BADFRAMES				// Reports Bad Frames (Frame Holds) on the SBUS.
@@ -299,7 +299,7 @@ void do_Stuff(int rx) {
 
 #if defined(DEBUG_DATA)
 	//debug_Data(rx);
-	if (rx == 1) { debug_Data(rx); }
+	if (rx == 0) { debug_Data(rx); }
 #endif
 	check_BadFrame(rx);
 	// Must proccess this last as it updates the previousChannel variable
@@ -413,7 +413,7 @@ void check_ChannelSignificantChange(int rx) {
 		//Serial.print(" FirstRun = "); Serial.print(firstRun);
 		if (channels[rx][ch] == channelsPrevious[rx][ch] && channelHoldTriggered[rx][ch] == false && firstRun == false) {
 			//Serial.print(RX_NAMES[rx]); Serial.print(" = "); Serial.println("Channel Hold");
-			if (rx == 1) { Serial.print(RX_NAMES[rx]); Serial.print(" = "); Serial.println("Channel Hold"); }
+			//Serial.print(RX_NAMES[rx]); Serial.print(" = "); Serial.println("Channel Hold"); 
 			//Serial.print("Pre"); Serial.print(rx+1); Serial.print(" = "); Serial.println(channelsPrevious[rx][ch]);
 			//Serial.print("New"); Serial.print(rx+1); Serial.print(" = "); Serial.println(channels[rx][ch]);
 			channelHoldTriggered[rx][ch] = true;
@@ -426,7 +426,7 @@ void check_ChannelSignificantChange(int rx) {
 				channelsMaxHoldMillis[rx] = millis() - channelsStartHoldMillis[rx];
 			}
 			//Serial.print(RX_NAMES[rx]);  Serial.print(" = "); Serial.print("Channel Hold Recovered "); Serial.print(channelsMaxHoldMillis[rx]); Serial.println("ms");
-			if (rx == 1) { Serial.print(RX_NAMES[rx]);  Serial.print(" = "); Serial.print("Channel Hold Recovered "); Serial.print(channelsMaxHoldMillis[rx]); Serial.println("ms"); }
+			//Serial.print(RX_NAMES[rx]);  Serial.print(" = "); Serial.print("Channel Hold Recovered "); Serial.print(channelsMaxHoldMillis[rx]); Serial.println("ms");
 			channelHoldTriggered[rx][ch] = false;
 			channelsPrevious[rx][ch] = channels[rx][ch];  // After a hold dont count a significant change
 		}
@@ -565,14 +565,19 @@ void check_BadFrame(int rx) {
 
 	// work out the bad frame percentage over the last 100 frames
 	uint8_t diff = abs(channels[rx][0] - channelsPrevious[rx][0]);
+	// if channels 1-8 have not changed check 9-16
+	if (diff == 0) {
+		diff = abs(channels[rx][8] - channelsPrevious[rx][8]);
+	}
 	if (diff > 10 * (NUMBER_OF_CH / 8)) {
-		int badFrames = ((float)(abs(channels[rx][0] - channelsPrevious[rx][0])) / (8 * (NUMBER_OF_CH / 8))) - 1;
+		int badFrames = ((float)(abs(diff)) / (8 * (NUMBER_OF_CH / 8))) - 1;
 		badFramesCounter[rx] += badFrames;
 		// Calculate overall bad frames %
 		badFramesPercentage[rx] = 100 - (((float)badFramesCounter[rx] / totalValidFramesCounter[rx]) * 100);
 		// Calculate based on last 100 frames.
 		badFramesPercentage100Array[rx][badFramesPercentage100Counter[rx]] = badFrames;
-
+		
+		//Serial.print("B   "); Serial.println(badFrames);
 
 #if defined(REPORT_ERRORS_BADFRAMES)
 		Serial.print(RX_NAMES[rx]); Serial.print(" = ");
@@ -597,6 +602,8 @@ void check_BadFrame(int rx) {
 	}
 	if (badFramesPercentage100Result[rx] > 100) badFramesPercentage100Result[rx] = 100;
 	badFramesPercentage100Result[rx] = 100 - badFramesPercentage100Result[rx];
+
+	//Serial.println(badFramesPercentage100Result[rx]);
 }
 
 
@@ -653,13 +660,25 @@ void debug_Data(int rx) {
 	//		Serial.println("CH1-8 repeated - CH9-16 updated");
 	//	}
 	//}
-	
+
 	//for (int ch = 0; ch < NUMBER_OF_CH; ch++) {
-		for (int ch = 0; ch < 1; ch++) {
+	for (int ch = 0; ch < 1; ch++) {
+		Serial.print(micros()); Serial.print(":");
 		Serial.print(RX_NAMES[rx]); Serial.print(" = ");
-		Serial.print("CH"); Serial.print(ch+1); Serial.print(" = ");
+		Serial.print("CH"); Serial.print(ch + 1); Serial.print(" = ");
 		Serial.print(channelsPrevious[rx][ch]); Serial.print(" vs "); Serial.print(channels[rx][ch]);
-		Serial.print(" = "); Serial.println(channelsPrevious[rx][ch] - channels[rx][ch]);
+		Serial.print(" = "); Serial.print(channelsPrevious[rx][ch] - channels[rx][ch]);
+		Serial.print("  BFP ="); Serial.println(badFramesPercentage100Result[rx]);
+		//Serial.print(" LongLoop "); Serial.println(longLoopCounter);
+		//Serial.print(" Direction "); Serial.println(direction);
+	}
+	for (int ch = 8; ch < 9; ch++) {
+		Serial.print(micros()); Serial.print(":");
+		Serial.print(RX_NAMES[rx]); Serial.print(" = ");
+		Serial.print("CH"); Serial.print(ch + 1); Serial.print(" = ");
+		Serial.print(channelsPrevious[rx][ch]); Serial.print(" vs "); Serial.print(channels[rx][ch]);
+		Serial.print(" = "); Serial.print(channelsPrevious[rx][ch] - channels[rx][ch]);
+		Serial.print("  BFP ="); Serial.println(badFramesPercentage100Result[rx]);
 		//Serial.print(" LongLoop "); Serial.println(longLoopCounter);
 		//Serial.print(" Direction "); Serial.println(direction);
 	}
