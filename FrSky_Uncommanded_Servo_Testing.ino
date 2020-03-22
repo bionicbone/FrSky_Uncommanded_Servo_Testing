@@ -40,7 +40,7 @@
 #include "SBUS.h"
 
 // Config
-const byte NUMBER_OF_CH = 16;							// 8 or 16 channels to scan
+const byte NUMBER_OF_CH = 8;							// 8 or 16 channels to scan
 const byte NUMBER_OF_RX = 4;							// Max 2 for Teensy 3.2 / Max 6 for Teensy 4.0
 #define FrSky_SERIAL SERIAL_5							// SERIAL_3 for Teensy 3.2 / SERIAL_7 for Teensy 4.0
 const byte MAX_CHANNEL_INCREASE = 104;			// ~8 per frame, 48 = 6 frames, not less than 10
@@ -57,7 +57,7 @@ const String RX_NAMES[] = { "Rx1-X4R(v2.1.0-LBT)", "Rx2-XM+(v2.1.0-LBT)" ,"Rx3-R
 // Normally OFF
 //#define DEBUG_DATA										// Dump Previous & Current Channel Data to USB
 //#define NO_RX_ATTACHED								// Allow execution like an Rx is attached to Rx1.
-#define REPORT_ERRORS									// Reports SBUS LostFrame and FailSafe flags
+//#define REPORT_ERRORS									// Reports SBUS LostFrame and FailSafe flags
 //#define REPORT_ERRORS_BADFRAMES				// Reports Bad Frames (Frame Holds) on the SBUS.
 //#define UPDATE_DISPLAY								// WARNING: Long Loops!! - Activate the TFT display and update
 
